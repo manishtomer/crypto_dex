@@ -72,7 +72,7 @@ contract FixedSupplyToken is ERC20Interface {
 
     //Transfer the balance from one account to another 
     function transfer(address _to, uint256 _amount) public returns (bool) {
-        if (balances[msg.sender] > _amount 
+        if (balances[msg.sender] >= _amount 
         && _amount > 0
         && balances[_to] + _amount > balances[_to]) {
             balances[msg.sender] -= _amount;
@@ -83,6 +83,41 @@ contract FixedSupplyToken is ERC20Interface {
         else {
             return false;
         }
+    }
+
+    function transferFrom(
+        address _from, 
+        address _to, 
+        uint256 _amount 
+    ) 
+        public 
+        returns (bool) 
+    {
+        if (balances[_from] >= _amount
+        && allowed[_from][msg.sender] >= _amount
+        && _amount > 0
+        && balances[_to] + _amount > balances[_to]) {
+            balances[_from] -= _amount;
+            allowed[_from][msg.sender] -= _amount;
+            balances[_to] += _amount;
+            emit Transfer(_from, _to, _amount);
+            return true;
+        }
+        else {
+            return false;
+        }
+    }
+
+    //approve for withdrawal
+    function approve(address _spender, uint256 _amount) public returns (bool) {
+        allowed[msg.sender][_spender] = _amount;
+        emit Approval(msg.sender, _spender, _amount);
+        return true;
+    }
+
+    //allownce how much spender is allowed to spend
+    function allowance(address _owner, address _spender) public view returns (uint) {
+        return allowed[_owner][_spender];
     }
 
 
