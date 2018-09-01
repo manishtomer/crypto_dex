@@ -66,6 +66,22 @@ contract Exchange is owned {
     event EtherDeposit(address indexed _from, uint _amount, uint _timestamp);
     event EtherWithdraw(address indexed _to, uint _amount, uint _timestamp);
 
+    //events for orders
+    event LimitSellOrderCreated(uint indexed _symbolIndex, address indexed _who, uint _amountTokens, uint _priceInWei, uint _orderKey);
+
+    event SellOrderFulfilled(uint indexed _symbolIndex, uint _amount, uint _priceInWei, uint _orderKey);
+
+    event SellOrderCanceled(uint indexed _symbolIndex, uint _priceInWei, uint _orderKey);
+
+    event LimitBuyOrderCreated(uint indexed _symbolIndex, address indexed _who, uint _amountTokens, uint _priceInWei, uint _orderKey);
+
+    event BuyOrderFulfilled(uint indexed _symbolIndex, uint _amount, uint _priceInWei, uint _orderKey);
+
+    event BuyOrderCanceled(uint indexed _symbolIndex, uint _priceInWei, uint _orderKey);
+
+    //events for management
+    event TokenAddedToSystem(uint _symbolIndex, string _token, uint _timestamp);
+
     ///////////////////////////////////
     // Deposits and Withdrawal Ether //
     ///////////////////////////////////
@@ -195,7 +211,7 @@ contract Exchange is owned {
             // not enough tokens available at price to fulfill so add the buy order to the book
 
             addBuyOffer(tokenNameIndex, priceInWei, amount, msg.sender);
-            // TODO emit LimitBuyOrder
+            emit LimitBuyOrderCreated(tokenNameIndex, msg.sender, amount, priceInWei, tokens[tokenNameIndex].buyBook[priceInWei].offers_length);
         } else {
             //it's a market order, can be filled
             revert (); //TODO market order call
@@ -288,7 +304,8 @@ contract Exchange is owned {
             // not enough tokens available at price to fulfill so add the buy order to the book
 
             addSellOffer(tokenNameIndex, priceInWei, amount, msg.sender);
-            // TODO emit LimitBuyOrder
+            emit LimitSellOrderCreated(tokenNameIndex, msg.sender, amount, priceInWei, tokens[tokenNameIndex].buyBook[priceInWei].offers_length);
+
         } else {
             //it's a market order, can be filled
             revert (); //TODO market order call
@@ -366,7 +383,7 @@ contract Exchange is owned {
     /// Order Book - Bid Order//
     ////////////////////////////
 
-    function getBuyOrderBook(string symbolName) view returns (uint [], uint []) {
+    function getBuyOrderBook(string symbolName) public view returns (uint [], uint []) {
         uint8 tokenNameIndex = getSymbolIndexorThrow(symbolName);
         uint[] memory arrPricesBuy = new uint[] (tokens[tokenNameIndex].amountBuyPrices);
         uint[] memory arrVolumeBuy = new uint[] (tokens[tokenNameIndex].amountBuyPrices);
@@ -386,10 +403,79 @@ contract Exchange is owned {
                 }
 
                 arrVolumeBuy[counter] = volumeAtPrice;
-                whilePrice = tokens[tokenNameIndex].buyBook[whilePrice].higherPrice;
+
+                if (whilePrice == tokens[tokenNameIndex].buyBook[whilePrice].higherPrice) {
+                    break;
+                } else {
+                    whilePrice = tokens[tokenNameIndex].buyBook[whilePrice].higherPrice;
+                }
                 counter++;
             }
         }
+
+        return (arrPricesBuy, arrVolumeBuy);
+    }
+
+    ////////////////////////////
+    /// Order Book - Ask Order//
+    ////////////////////////////
+
+    function getSellOrderBook(string symbolName) public view returns (uint [], uint []) {
+        uint8 tokenNameIndex = getSymbolIndexorThrow(symbolName);
+        uint[] memory arrPricesSell = new uint[] (tokens[tokenNameIndex].amountSellPrices);
+        uint[] memory arrVolumeSell = new uint[] (tokens[tokenNameIndex].amountSellPrices);
+
+        uint whilePrice = tokens[tokenNameIndex].curSellPrice;
+        uint counter = 0;
+        if (tokens[tokenNameIndex].curSellPrice > 0) {
+            while (whilePrice <= tokens[tokenNameIndex].highestSellPrice) {
+                arrPricesSell[counter] = whilePrice;
+                uint volumeAtPrice = 0;
+                uint offers_key = 0;
+
+                offers_key = tokens[tokenNameIndex].sellBook[whilePrice].offers_key;
+                while (offers_key <= tokens[tokenNameIndex].sellBook[whilePrice].offers_length) {
+                    volumeAtPrice += tokens[tokenNameIndex].sellBook[whilePrice].offers[offers_key].amount;
+                    offers_key++;
+                }
+
+                arrVolumeSell[counter] = volumeAtPrice;
+
+                if (tokens[tokenNameIndex].sellBook[whilePrice].higherPrice == 0) {
+                    break;
+                } else {
+                    whilePrice = tokens[tokenNameIndex].sellBook[whilePrice].higherPrice;
+                }
+                counter++;
+            }
+        }
+
+        return (arrPricesSell, arrVolumeSell);
+    }
+
+    function cancelOrder(string symbolName, bool isSellOrder, uint priceInWei, uint offerKey) public {
+        uint8 symbolNameIndex = getSymbolIndexorThrow(symbolName);
+        if (isSellOrder) {
+            require(tokens[symbolNameIndex].sellBook[priceInWei].offers[offerKey].who == msg.sender);
+
+            uint tokensAmount = tokens[symbolNameIndex].sellBook[priceInWei].offers[offerKey].amount;
+            require(tokenBalancesForAddress[msg.sender][symbolNameIndex] + tokensAmount >= tokenBalancesForAddress[msg.sender][symbolNameIndex]);
+        
+            tokenBalancesForAddress[msg.sender][symbolNameIndex] += tokensAmount; 
+            tokens[symbolNameIndex].sellBook[priceInWei].offers[offerKey].amount = 0;
+            emit SellOrderCanceled(symbolNameIndex, priceInWei, offerKey);
+        }
+        else {
+            require(tokens[symbolNameIndex].buyBook[priceInWei].offers[offerKey].who == msg.sender);
+
+            uint etherToRefund = tokens[symbolNameIndex].buyBook[priceInWei].offers[offerKey].amount * priceInWei;
+            require(balanceEthforAddress[msg.sender] + etherToRefund >= balanceEthforAddress[msg.sender]);
+
+            balanceEthforAddress[msg.sender] += etherToRefund; 
+            tokens[symbolNameIndex].buyBook[priceInWei].offers[offerKey].amount = 0;
+            emit BuyOrderCanceled(symbolNameIndex, priceInWei, offerKey);
+        }
+
     }
 
 }
